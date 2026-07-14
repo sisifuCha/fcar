@@ -25,15 +25,17 @@ def check(name, got, exp):
         fails.append(name)
 
 
-# --- control frames vs doc/07-08 ---
-check("STOP", stop_frame(), "$0110060000B5#")
-check("forward30", build_frame(0x01, 0x10, [0x00, 0x1E]), "$011006001ED3#")
-check("beep200", beep_frame(200), "$0113060114CD#")
-check("beep_off", beep_frame(0), "$0113060000B8#")
-check("beep_cont", beep_frame(1), "$01130601FFB8#")
+# --- control frames verified vs car rosmaster_main_ori.py (sum%256, no 0x9E) ---
+check("STOP", stop_frame(), "$011006000017#")
+check("forward30", build_frame(0x01, 0x10, [0x00, 0x1E]), "$011006001E35#")
+check("beep200", beep_frame(200), "$01130601142F#")
+check("beep_off", beep_frame(0), "$01130600001A#")
+check("beep_cont", beep_frame(1), "$01130601FF1A#")
 
 # --- compute_front_min ---
-cfg = ObstacleConfig(car_ip="127.0.0.1")
+# Synthetic scans place the obstacle at lidar angle 0, so test with forward=0
+# (independent of the real-car calibrated default).
+cfg = ObstacleConfig(car_ip="127.0.0.1", lidar_forward_deg=0.0)
 N, amin, inc = 360, -math.pi, 2 * math.pi / 360
 ranges = [5.0] * N
 for i in range(N):

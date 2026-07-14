@@ -26,11 +26,23 @@ except Exception:  # pragma: no cover - dependency missing until env is built
 from .config import ObstacleConfig
 
 
-def compute_front_min(scan: dict, config: ObstacleConfig) -> Optional[float]:
-    """Nearest valid range within [front_min_deg, front_max_deg], offset-corrected.
+def _norm180(deg: float) -> float:
+    """Wrap an angle in degrees to (-180, 180]."""
+    while deg > 180.0:
+        deg -= 360.0
+    while deg <= -180.0:
+        deg += 360.0
+    return deg
 
-    Returns None when no valid point falls in the front sector (i.e. nothing
-    near) so the state machine can treat it as CLEAR rather than DANGER.
+
+def compute_front_min(scan: dict, config: ObstacleConfig) -> Optional[float]:
+    """Nearest valid range in the front sector, relative to robot forward.
+
+    The front sector is measured relative to ``lidar_forward_deg`` (the lidar
+    angle that points at the robot's front), so a rotated lidar mount is handled
+    by calibration rather than assuming 0 rad == forward. Returns None when no
+    valid point falls in the sector (nothing near) so the state machine treats
+    it as CLEAR rather than DANGER.
     """
     ranges = scan.get("ranges") or []
     if not ranges:
@@ -39,8 +51,9 @@ def compute_front_min(scan: dict, config: ObstacleConfig) -> Optional[float]:
     inc = float(scan.get("angle_increment", 0.0))
     range_min = float(scan.get("range_min", 0.0))
     range_max = min(float(scan.get("range_max", config.max_range_m)), config.max_range_m)
-    lo = math.radians(config.front_min_deg)
-    hi = math.radians(config.front_max_deg)
+    fwd = config.lidar_forward_deg
+    lo = config.front_min_deg
+    hi = config.front_max_deg
 
     best: Optional[float] = None
     for r in ranges:
@@ -57,7 +70,9 @@ def compute_front_min(scan: dict, config: ObstacleConfig) -> Optional[float]:
             continue
         if not (range_min < rv < range_max):
             continue
-        if not (lo <= a <= hi):
+        # Angle of this point relative to robot forward, wrapped to (-180,180].
+        delta = _norm180(math.degrees(a) - fwd)
+        if not (lo <= delta <= hi):
             continue
         if best is None or rv < best:
             best = rv

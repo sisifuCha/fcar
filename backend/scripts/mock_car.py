@@ -50,14 +50,18 @@ ANGLE_INCREMENT = (2 * math.pi) / NUM_POINTS
 
 
 def verify_checksum(frame: str) -> bool:
-    """Validate a $CCTTLL..XX# control frame's checksum (doc/07 §4)."""
+    """Validate a $CCTTLL..XX# control frame's checksum.
+
+    Matches the car's rosmaster_main_ori.py parse_data(): sum of every byte from
+    CC through the last payload byte, mod 256 (no 0x9E seed).
+    """
     try:
         if not (frame.startswith("$") and frame.endswith("#")):
             return False
         body_hex = frame[1:-1]
         data = [int(body_hex[i:i + 2], 16) for i in range(0, len(body_hex), 2)]
         *fields, checksum = data
-        return ((0x9E + sum(fields)) & 0xFF) == checksum
+        return (sum(fields) % 256) == checksum
     except Exception:
         return False
 
@@ -235,12 +239,25 @@ def serve_control(host: str, port: int) -> None:
             break
 
         def handle(c=conn):
+            # Persistent client: keep reading complete $...# frames until the
+            # peer disconnects (mirrors the real car's single long connection).
             try:
-                data = c.recv(256)
-                if data:
-                    frame = data.decode("ascii", "ignore")
-                    ok = verify_checksum(frame.strip())
-                    print(f"[mock 6000] recv {frame!r} checksum_ok={ok}", flush=True)
+                c.settimeout(30)
+                buf = ""
+                while STATE["running"]:
+                    data = c.recv(256)
+                    if not data:
+                        break
+                    buf += data.decode("ascii", "ignore")
+                    while "#" in buf:
+                        idx = buf.index("#")
+                        frame, buf = buf[:idx + 1], buf[idx + 1:]
+                        start = frame.rfind("$")
+                        if start < 0:
+                            continue
+                        frame = frame[start:]
+                        ok = verify_checksum(frame)
+                        print(f"[mock 6000] recv {frame!r} checksum_ok={ok}", flush=True)
             except Exception:
                 pass
             finally:

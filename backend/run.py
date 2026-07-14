@@ -1,3 +1,4 @@
+import logging
 import os
 
 from app import attach_obstacle_service, create_app
@@ -5,6 +6,11 @@ from app.obstacle import ObstacleService
 
 DEBUG = True
 USE_RELOADER = True
+
+# Quiet Werkzeug's per-request access logs (the frontend polls status every
+# 0.5s and floods the console); keep warnings/errors. This makes the
+# [OBSTACLE] detection heartbeat readable.
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 app = create_app()
 

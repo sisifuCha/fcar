@@ -23,9 +23,14 @@ class ObstacleConfig:
     warn_distance_m: float = 0.90
     danger_distance_m: float = 0.50
 
-    # ---- Front sector (degrees, 0 = straight ahead) ----
+    # ---- Front sector (degrees, relative to robot forward) ----
     front_min_deg: float = -30.0
     front_max_deg: float = 30.0
+    # The lidar angle (deg) that points to the robot's forward direction. The
+    # lidar's 0 rad is NOT the robot front (mounted rotated ~+76 deg on this
+    # car, measured with scripts/lidar_calib.py). The front sector is
+    # [lidar_forward_deg+front_min_deg, +front_max_deg] with wrap-around.
+    lidar_forward_deg: float = 76.0
     # Additive correction applied to lidar ranges; calibrate on the real car.
     lidar_offset_m: float = 0.0
     # Ignore lidar returns beyond this range (meters).
@@ -36,10 +41,18 @@ class ObstacleConfig:
     danger_confirm_count: int = 2
     clear_confirm_count: int = 5
     # A sensor whose last sample is older than this is treated as stale/UNKNOWN.
-    stale_after_sec: float = 1.5
+    # Raised to 8s because the car's sensor_relay pushes @SCAN in sparse bursts
+    # (not a steady 10Hz); a tighter window makes lidar flap alive/stale.
+    stale_after_sec: float = 8.0
 
     # ---- Vision (YOLO) ----
     vision_enabled: bool = True
+    # Path/name of the YOLO weights. ultralytics auto-downloads from GitHub if
+    # only a name is given; point this at a local .pt file to skip the download
+    # (useful when GitHub is unreachable). Override with YOLO_MODEL.
+    vision_model_path: str = field(
+        default_factory=lambda: os.environ.get("YOLO_MODEL", "yolov8n.pt")
+    )
     # COCO class names treated as obstacles. Empty => any detected class counts.
     vision_classes: list[str] = field(
         default_factory=lambda: [
@@ -58,8 +71,11 @@ class ObstacleConfig:
     # ---- Actuation (TCP 6000) ----
     beep_enabled: bool = True
     stop_enabled: bool = True
-    # Master safety switch: when False, DANGER only logs would_send_stop/beep.
-    actuation_enabled: bool = False
+    # Master switch. True => DANGER really sends beep/STOP frames to the car on
+    # startup (buzzer sounds). Set env ACTUATION=0 to fall back to dry-run.
+    actuation_enabled: bool = field(
+        default_factory=lambda: os.environ.get("ACTUATION", "1") not in ("0", "false", "False")
+    )
     beep_duration_ms: int = 200
     beep_interval_sec: float = 1.0
     stop_interval_sec: float = 0.5

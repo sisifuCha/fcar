@@ -45,7 +45,10 @@ def main():
     procs.append(sink)
     time.sleep(1.5)  # let servers bind
 
-    cfg = ObstacleConfig(car_ip="127.0.0.1", vision_enabled=False, actuation_enabled=False)
+    # mock_car places the obstacle at lidar angle 0, so use forward=0 here
+    # (independent of the real-car calibrated default of 76 deg).
+    cfg = ObstacleConfig(car_ip="127.0.0.1", vision_enabled=False,
+                         actuation_enabled=False, lidar_forward_deg=0.0)
     svc = ObstacleService(cfg)
     svc.start()
     try:
@@ -69,13 +72,20 @@ def main():
         check("dry_run_never_sent", ctrl["last_action"] in ("dry_run", "rate_limited"),
               str(ctrl["last_action"]))
 
-        # Enable actuation -> real STOP frame should hit the mock 6000 sink.
+        # Enable actuation -> real frames should hit the mock 6000 sink. The
+        # 10Hz loop alternates sent/rate_limited, so poll for a "sent" moment.
         svc.update_config({"actuation_enabled": True})
-        time.sleep(1.5)
+        sent_seen = False
+        deadline = time.time() + 2.5
+        while time.time() < deadline:
+            if svc.control.state_dict()["last_action"] == "sent":
+                sent_seen = True
+                break
+            time.sleep(0.05)
         ctrl = svc.control.state_dict()
-        check("actuation_sent", ctrl["last_action"] == "sent", str(ctrl["last_action"]))
+        check("actuation_sent", sent_seen, str(ctrl["last_action"]))
         check("last_frame_is_stop_or_beep",
-              ctrl["last_frame"] in ("$0110060000B5#", "$0113060114CD#"),
+              ctrl["last_frame"] in ("$011006000017#", "$01130601142F#"),
               str(ctrl["last_frame"]))
     finally:
         svc.stop()

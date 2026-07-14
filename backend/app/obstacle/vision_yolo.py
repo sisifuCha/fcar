@@ -64,7 +64,7 @@ class VisionWorker:
         self._model_loaded = True
         try:
             from ultralytics import YOLO
-            self._model = YOLO("yolov8n.pt")
+            self._model = YOLO(self.config.vision_model_path)
             self._names = self._model.names
             return True
         except Exception as exc:  # noqa: BLE001
@@ -164,24 +164,28 @@ class VisionWorker:
                         best_label = label
                     _ = cx  # reserved for future lateral steering logic
 
-        sample = {
+        self._publish(annotated, {
             "present": present,
             "label": best_label,
             "area_ratio": best_area_ratio,
             "timestamp": time.time(),
             "frame_w": w,
             "frame_h": h,
-        }
+            "model": True,
+        })
+
+    def _publish(self, frame, sample: Optional[dict]) -> None:
+        """Encode the frame to JPEG for the video endpoint and store the sample."""
         jpeg = None
-        if cv2 is not None:
-            try:
-                ok, buf = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-                if ok:
-                    jpeg = buf.tobytes()
-            except Exception:
-                jpeg = None
+        try:
+            ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            if ok:
+                jpeg = buf.tobytes()
+        except Exception:
+            jpeg = None
         with self._lock:
-            self._latest = sample
+            if sample is not None:
+                self._latest = sample
             if jpeg is not None:
                 self._latest_jpeg = jpeg
 

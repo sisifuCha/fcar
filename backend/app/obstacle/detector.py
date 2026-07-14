@@ -73,20 +73,25 @@ class FusionDetector:
         cfg = self.config
         lidar_fresh = bool(lidar) and (now_ts() - lidar.get("timestamp", 0)) <= cfg.stale_after_sec
         vision_fresh = bool(vision) and (now_ts() - vision.get("timestamp", 0)) <= cfg.stale_after_sec
+        # Vision only participates in the decision when the YOLO model is
+        # actually running. In passthrough mode (no model, e.g. torch not yet
+        # installed) the frames still stream for display but must NOT veto the
+        # lidar — otherwise present=False would downgrade a real DANGER.
+        vis_ok = bool(vision_fresh and vision.get("model", True))
 
-        vis_present = bool(vision_fresh and vision.get("present"))
-        vis_label = vision.get("label") if vision_fresh else None
-        vis_area = float(vision.get("area_ratio", 0.0)) if vision_fresh else 0.0
+        vis_present = bool(vis_ok and vision.get("present"))
+        vis_label = vision.get("label") if vis_ok else None
+        vis_area = float(vision.get("area_ratio", 0.0)) if vis_ok else 0.0
 
         front = lidar.get("front_min_m") if lidar_fresh else None
 
         # ---- Lidar authority (distance available) ----
         if lidar_fresh and front is not None:
-            source = "fusion" if vision_fresh else "lidar"
+            source = "fusion" if vis_ok else "lidar"
             if front < cfg.danger_distance_m:
                 # Distance is dangerous; require vision confirmation only when
                 # vision is available. If vision is down, trust the lidar.
-                if (not vision_fresh) or vis_present:
+                if (not vis_ok) or vis_present:
                     return "DANGER", front, source, vis_label
                 return "WARN", front, source, vis_label
             if front < cfg.warn_distance_m:
@@ -95,10 +100,10 @@ class FusionDetector:
 
         # ---- Lidar fresh but no return in front sector => nothing near => CLEAR ----
         if lidar_fresh and front is None:
-            return "CLEAR", None, ("fusion" if vision_fresh else "lidar"), vis_label
+            return "CLEAR", None, ("fusion" if vis_ok else "lidar"), vis_label
 
-        # ---- Vision-only fallback (lidar down) ----
-        if vision_fresh:
+        # ---- Vision-only fallback (lidar down, model running) ----
+        if vis_ok:
             if vis_present and vis_area >= cfg.vision_area_danger:
                 return "DANGER", None, "vision_only", vis_label
             if vis_present and vis_area >= cfg.vision_area_warn:

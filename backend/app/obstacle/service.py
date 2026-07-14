@@ -33,6 +33,7 @@ class ObstacleService:
         self._tick_hz = 10.0
         self._last_console_level: Optional[str] = None
         self._last_console_ts = 0.0
+        self._console_interval_sec = 3.0  # heartbeat period for CLEAR/UNKNOWN
 
     # ---- lifecycle ----
     def start(self) -> None:
@@ -51,6 +52,7 @@ class ObstacleService:
         self._stop.set()
         self.lidar.stop()
         self.vision.stop()
+        self.control.close()
 
     def _fusion_loop(self) -> None:
         period = 1.0 / self._tick_hz
@@ -66,18 +68,23 @@ class ObstacleService:
 
     def _maybe_console(self, status) -> None:
         now = time.time()
-        if status.level in ("WARN", "DANGER"):
-            changed = status.level != self._last_console_level
-            if changed or (now - self._last_console_ts) >= 1.0:
-                dist = "unknown" if status.distance_m is None else f"{status.distance_m:.2f}m"
-                print(
-                    f"[OBSTACLE] {status.level} source={status.source} "
-                    f"dist={dist} label={status.label} :: {status.message}",
-                    flush=True,
-                )
-                self._last_console_ts = now
-        elif self._last_console_level in ("WARN", "DANGER"):
-            print(f"[OBSTACLE] CLEAR source={status.source}", flush=True)
+        changed = status.level != self._last_console_level
+        # Print immediately on any level change; otherwise a heartbeat every
+        # few seconds so it's visible the detector is alive even while CLEAR.
+        if changed or (now - self._last_console_ts) >= self._console_interval_sec:
+            dist = "n/a" if status.distance_m is None else f"{status.distance_m:.2f}m"
+            lh = self.lidar.health()
+            vh = self.vision.health()
+            extra = ""
+            if status.source in ("vision_only", "fusion", "none"):
+                extra = f" vis_area={vh.get('area_ratio')}"
+            print(
+                f"[OBSTACLE] {status.level:7s} source={status.source} dist={dist} "
+                f"label={status.label} | lidar={'ok' if lh['alive'] else 'down'} "
+                f"vision={'ok' if vh['alive'] else 'down'}{extra}",
+                flush=True,
+            )
+            self._last_console_ts = now
         self._last_console_level = status.level
 
     # ---- payloads ----
@@ -121,6 +128,7 @@ class ObstacleService:
             "danger_distance_m": float,
             "front_min_deg": float,
             "front_max_deg": float,
+            "lidar_forward_deg": float,
             "lidar_offset_m": float,
             "max_range_m": float,
             "warn_confirm_count": int,
@@ -128,6 +136,7 @@ class ObstacleService:
             "clear_confirm_count": int,
             "stale_after_sec": float,
             "vision_enabled": bool,
+            "vision_model_path": str,
             "vision_conf": float,
             "vision_center_x_min": float,
             "vision_center_x_max": float,

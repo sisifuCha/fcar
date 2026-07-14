@@ -1,11 +1,15 @@
 """PC-side control client: send STOP / beep frames to the car over TCP 6000.
 
-Frame format and checksum come from doc/07 §4-5 and doc/08 §3-6:
+Frame format and checksum verified against the car's rosmaster_main_ori.py
+parse_data() (the 6000 TCP handler):
 
     $ + CC(car_type) + TT(cmd) + LL(len) + PAYLOAD + XX(checksum) + #
 
     length   = len(payload) * 2 + 2
-    checksum = (0x9E + sum([car_type, cmd, length] + payload)) & 0xFF
+    checksum = sum([car_type, cmd, length] + payload) % 256   # NO 0x9E seed
+
+parse_data verifies: int(data[5:7],16) == len(data)-8 (the LL check) and
+checknum = sum of every byte from CC through the last payload byte, mod 256.
 
 Rate-limiting mirrors obstacle_alert/src/hardware.py (last_stop_ts / last_beep_ts
 + min interval), but the actuator is TCP frames instead of a serial Rosmaster.
@@ -29,12 +33,12 @@ CMD_BEEP = 0x13
 def build_frame(car_type: int, cmd: int, payload: list[int]) -> str:
     length = len(payload) * 2 + 2
     body = [car_type, cmd, length] + payload
-    checksum = (0x9E + sum(body)) & 0xFF
+    checksum = sum(body) % 256
     return "$" + "".join(f"{b:02X}" for b in body) + f"{checksum:02X}#"
 
 
 def stop_frame() -> str:
-    # build_frame(0x01, 0x10, [0x00, 0x00]) -> $0110060000B5#
+    # build_frame(0x01, 0x10, [0x00, 0x00]) -> $011006000017#
     return build_frame(CAR_TYPE, CMD_MOTION, [0x00, 0x00])
 
 
@@ -62,21 +66,52 @@ class ControlClient:
         self._last_frame: Optional[str] = None
         self._last_error: Optional[str] = None
         self._last_action: Optional[str] = None  # sent | dry_run | rate_limited | error
+        # Persistent connection to the car's 6000 TCP server. It is (near)
+        # single-client and slow to accept, so opening a fresh socket per frame
+        # causes intermittent connect timeouts -> dropped beeps. We hold one
+        # connection and reuse it, reconnecting only when a send fails.
+        self._send_lock = threading.Lock()
+        self._sock: Optional[socket.socket] = None
+        self._sock_addr: Optional[tuple] = None
 
-    # ---- low-level send ----
+    # ---- low-level send (persistent connection) ----
+    def _close_sock(self) -> None:
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except Exception:
+                pass
+        self._sock = None
+        self._sock_addr = None
+
     def _send_frame(self, frame: str) -> bool:
         cfg = self.config
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(1.0)
-            s.connect((cfg.car_ip, cfg.control_port))
-            s.sendall(frame.encode("ascii"))
-            s.close()
-            self._last_error = None
-            return True
-        except Exception as exc:  # noqa: BLE001 - report, don't crash the loop
-            self._last_error = repr(exc)
+        addr = (cfg.car_ip, cfg.control_port)
+        with self._send_lock:
+            # Drop a stale connection if the target address changed.
+            if self._sock is not None and self._sock_addr != addr:
+                self._close_sock()
+            # Try on the existing connection, then once more on a fresh one.
+            for _ in range(2):
+                try:
+                    if self._sock is None:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s.settimeout(1.0)
+                        s.connect(addr)
+                        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                        self._sock = s
+                        self._sock_addr = addr
+                    self._sock.sendall(frame.encode("ascii"))
+                    self._last_error = None
+                    return True
+                except Exception as exc:  # noqa: BLE001 - report, retry once
+                    self._last_error = repr(exc)
+                    self._close_sock()
             return False
+
+    def close(self) -> None:
+        with self._send_lock:
+            self._close_sock()
 
     def _dispatch(self, frame: str, dry_run_note: str) -> bool:
         """Send or dry-run a frame. Caller holds no lock; we take it."""
