@@ -29,3 +29,5 @@ coverage/
 .coverage
 htmlcov/
 .pytest_cache/
+
+.claude/

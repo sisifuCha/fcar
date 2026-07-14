@@ -1,0 +1,19 @@
+name: fcar
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - flask>=3.0.0
+      - flask-cors>=4.0.0
+      - pillow>=10.0.0
+      - numpy>=1.26.0
+      - requests>=2.31.0
+      - websocket-client>=1.7.0
+      - opencv-python>=4.9.0
+      - ultralytics>=8.1.0
+      # For GPU (RTX 4060), install torch from the CUDA wheel index AFTER
+      # creating the env (ultralytics pulls a CPU torch otherwise):
+      #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
