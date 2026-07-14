@@ -99,9 +99,14 @@ body {
   display: grid;
   grid-template-columns: 1.5fr 1fr;
   grid-template-areas:
+    'obstacle obstacle'
     'stream status'
     'alerts alerts';
   gap: 1rem;
+}
+
+.obstacle-panel {
+  grid-area: obstacle;
 }
 
 .stream-panel {
@@ -292,13 +297,87 @@ button.ghost {
   color: var(--muted);
 }
 
+/* ---- Obstacle panel ---- */
+.obstacle-body {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  grid-template-areas:
+    'video message'
+    'video status'
+    'video actions';
+  gap: 0.75rem 1.1rem;
+  align-items: start;
+}
+
+.obstacle-body .stream-frame {
+  grid-area: video;
+}
+
+.obstacle-message {
+  grid-area: message;
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.75);
+  font-weight: 600;
+}
+
+.obstacle-body .status-list {
+  grid-area: status;
+}
+
+.obstacle-body .actions {
+  grid-area: actions;
+  margin-top: 0;
+}
+
+/* Obstacle level colors (uppercase levels from the backend) */
+.obstacle-badge.level-CLEAR,
+.obstacle-message.level-CLEAR {
+  color: var(--ok);
+  border-color: #abefc6;
+  background: #ecfdf3;
+}
+
+.obstacle-badge.level-WARN,
+.obstacle-message.level-WARN {
+  color: var(--warn);
+  border-color: #fec84b;
+  background: #fffaeb;
+}
+
+.obstacle-badge.level-DANGER,
+.obstacle-message.level-DANGER {
+  color: var(--danger);
+  border-color: #fecdca;
+  background: #fef3f2;
+}
+
+.obstacle-badge.level-UNKNOWN,
+.obstacle-message.level-UNKNOWN {
+  color: var(--muted);
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.7);
+}
+
 @media (max-width: 860px) {
   .grid {
     grid-template-columns: 1fr;
     grid-template-areas:
+      'obstacle'
       'stream'
       'status'
       'alerts';
+  }
+
+  .obstacle-body {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'video'
+      'message'
+      'status'
+      'actions';
   }
 
   .top {

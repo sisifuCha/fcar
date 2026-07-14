@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, type AlertItem, type VehicleStatus } from './api'
+import {
+  api,
+  type AlertItem,
+  type ObstacleStatus,
+  type SensorHealth,
+  type VehicleStatus,
+} from './api'
 import './App.css'
 
 function formatTime(iso: string) {
@@ -10,9 +16,16 @@ function formatTime(iso: string) {
   }
 }
 
+function sensorText(s: SensorHealth): string {
+  if (s.alive) return '在线'
+  if (s.connected) return '连接中 / 数据陈旧'
+  return '离线'
+}
+
 export default function App() {
   const [vehicle, setVehicle] = useState<VehicleStatus | null>(null)
   const [alerts, setAlerts] = useState<AlertItem[]>([])
+  const [obstacle, setObstacle] = useState<ObstacleStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -32,6 +45,49 @@ export default function App() {
     const timer = window.setInterval(() => void refresh(), 2000)
     return () => window.clearInterval(timer)
   }, [refresh])
+
+  const refreshObstacle = useCallback(async () => {
+    try {
+      setObstacle(await api.obstacleStatus())
+    } catch {
+      setObstacle(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshObstacle()
+    const timer = window.setInterval(() => void refreshObstacle(), 500)
+    return () => window.clearInterval(timer)
+  }, [refreshObstacle])
+
+  async function toggleActuation() {
+    if (!obstacle) return
+    try {
+      setObstacle(
+        await api.updateObstacleConfig({
+          actuation_enabled: !obstacle.config.actuation_enabled,
+        }),
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '切换执行模式失败')
+    }
+  }
+
+  async function beepTest() {
+    try {
+      await api.carBeep(200)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '蜂鸣失败')
+    }
+  }
+
+  async function manualStop() {
+    try {
+      await api.carStop()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '停车失败')
+    }
+  }
 
   async function runCommand(action: string, extra?: Record<string, unknown>) {
     setBusy(true)
@@ -83,6 +139,74 @@ export default function App() {
       </header>
 
       <main className="grid">
+        <section className="panel obstacle-panel">
+          <div className="panel-head">
+            <h2>障碍物检测</h2>
+            {obstacle ? (
+              <span className={`tag obstacle-badge level-${obstacle.level}`}>
+                {obstacle.level}
+              </span>
+            ) : (
+              <span className="tag">未连接</span>
+            )}
+          </div>
+          {obstacle ? (
+            <div className="obstacle-body">
+              <div className="stream-frame">
+                <img src={api.obstacleVideoUrl} alt="YOLO 标注画面" />
+              </div>
+              <p className={`obstacle-message level-${obstacle.level}`}>
+                {obstacle.message}
+              </p>
+              <dl className="status-list">
+                <div>
+                  <dt>距离</dt>
+                  <dd>
+                    {obstacle.distance_m == null
+                      ? '—'
+                      : `${obstacle.distance_m.toFixed(2)} m`}
+                  </dd>
+                </div>
+                <div>
+                  <dt>类别</dt>
+                  <dd>{obstacle.label ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt>来源</dt>
+                  <dd>{obstacle.source}</dd>
+                </div>
+                <div>
+                  <dt>雷达</dt>
+                  <dd>{sensorText(obstacle.sensors.lidar)}</dd>
+                </div>
+                <div>
+                  <dt>视觉</dt>
+                  <dd>{sensorText(obstacle.sensors.vision)}</dd>
+                </div>
+                <div>
+                  <dt>执行</dt>
+                  <dd className={obstacle.config.actuation_enabled ? 'mode mode-driving' : 'muted'}>
+                    {obstacle.config.actuation_enabled ? '真实发送' : 'dry-run（只打印）'}
+                  </dd>
+                </div>
+              </dl>
+              <div className="actions">
+                <button type="button" onClick={() => void toggleActuation()}>
+                  {obstacle.config.actuation_enabled ? '切回 dry-run' : '启用真实控制'}
+                </button>
+                <button type="button" className="ghost" onClick={() => void beepTest()}>
+                  蜂鸣测试
+                </button>
+                <button type="button" className="danger" onClick={() => void manualStop()}>
+                  手动 STOP
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="muted">障碍物服务未连接（后端未启动或子系统未运行）</p>
+          )}
+        </section>
+
         <section className="panel stream-panel">
           <div className="panel-head">
             <h2>实时影像</h2>
