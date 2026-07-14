@@ -1,0 +1,184 @@
+import { useCallback, useEffect, useState } from 'react'
+import { api, type AlertItem, type VehicleStatus } from './api'
+import './App.css'
+
+function formatTime(iso: string) {
+  try {
+    return new Date(iso).toLocaleString('zh-CN')
+  } catch {
+    return iso
+  }
+}
+
+export default function App() {
+  const [vehicle, setVehicle] = useState<VehicleStatus | null>(null)
+  const [alerts, setAlerts] = useState<AlertItem[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const refresh = useCallback(async () => {
+    try {
+      const [v, a] = await Promise.all([api.vehicleStatus(), api.alerts()])
+      setVehicle(v)
+      setAlerts(a.items)
+      setError(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '无法连接后端')
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 2000)
+    return () => window.clearInterval(timer)
+  }, [refresh])
+
+  async function runCommand(action: string, extra?: Record<string, unknown>) {
+    setBusy(true)
+    try {
+      await api.sendCommand(action, extra)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '指令失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function ack(id: string) {
+    try {
+      await api.ackAlert(id)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '确认失败')
+    }
+  }
+
+  async function simulateObstacle() {
+    try {
+      await api.createAlert({
+        level: 'warning',
+        code: 'OBS',
+        message: '检测到前方障碍物，请减速或绕行',
+      })
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '告警创建失败')
+    }
+  }
+
+  return (
+    <div className="page">
+      <header className="top">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden />
+          <div>
+            <h1>FCar</h1>
+            <p>车载监控台 · 实时影像与告警</p>
+          </div>
+        </div>
+        <div className={`link-state ${error ? 'bad' : 'ok'}`}>
+          {error ? `后端异常：${error}` : 'API 已连接'}
+        </div>
+      </header>
+
+      <main className="grid">
+        <section className="panel stream-panel">
+          <div className="panel-head">
+            <h2>实时影像</h2>
+            <span className="tag live">MJPEG</span>
+          </div>
+          <div className="stream-frame">
+            <img src={api.streamUrl} alt="小车实时预览" />
+          </div>
+        </section>
+
+        <section className="panel status-panel">
+          <div className="panel-head">
+            <h2>车辆状态</h2>
+          </div>
+          {vehicle ? (
+            <dl className="status-list">
+              <div>
+                <dt>编号</dt>
+                <dd>{vehicle.id}</dd>
+              </div>
+              <div>
+                <dt>在线</dt>
+                <dd>{vehicle.online ? '是' : '否'}</dd>
+              </div>
+              <div>
+                <dt>模式</dt>
+                <dd className={`mode mode-${vehicle.mode}`}>{vehicle.mode}</dd>
+              </div>
+              <div>
+                <dt>电量</dt>
+                <dd>{vehicle.battery}%</dd>
+              </div>
+              <div>
+                <dt>速度</dt>
+                <dd>{vehicle.speed_kmh.toFixed(1)} km/h</dd>
+              </div>
+              <div>
+                <dt>位置</dt>
+                <dd>
+                  {vehicle.position.lat.toFixed(4)}, {vehicle.position.lng.toFixed(4)}
+                </dd>
+              </div>
+              <div>
+                <dt>更新</dt>
+                <dd>{formatTime(vehicle.updated_at)}</dd>
+              </div>
+            </dl>
+          ) : (
+            <p className="muted">加载中…</p>
+          )}
+
+          <div className="actions">
+            <button type="button" disabled={busy} onClick={() => void runCommand('start')}>
+              启动
+            </button>
+            <button type="button" disabled={busy} onClick={() => void runCommand('stop')}>
+              停车
+            </button>
+            <button
+              type="button"
+              className="danger"
+              disabled={busy}
+              onClick={() => void runCommand('emergency')}
+            >
+              急停
+            </button>
+            <button type="button" className="ghost" disabled={busy} onClick={() => void simulateObstacle()}>
+              模拟障碍告警
+            </button>
+          </div>
+        </section>
+
+        <section className="panel alerts-panel">
+          <div className="panel-head">
+            <h2>告警</h2>
+            <span className="tag">{alerts.filter((a) => !a.acked).length} 未确认</span>
+          </div>
+          <ul className="alerts">
+            {alerts.length === 0 && <li className="muted">暂无告警</li>}
+            {alerts.map((a) => (
+              <li key={a.id} className={`alert level-${a.level} ${a.acked ? 'acked' : ''}`}>
+                <div className="alert-main">
+                  <strong>{a.code}</strong>
+                  <span>{a.message}</span>
+                  <time>{formatTime(a.created_at)}</time>
+                </div>
+                {!a.acked && (
+                  <button type="button" className="ghost" onClick={() => void ack(a.id)}>
+                    确认
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      </main>
+    </div>
+  )
+}
